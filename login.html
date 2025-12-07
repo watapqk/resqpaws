@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ResQ Paws - Mobility for Pets</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tone.js for sound effects -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <!-- Three.js for 3D Landing Page -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body class="flex flex-col text-gray-800">
+
+   
+    <div id="app-loader">
+        <div class="loader-spinner mb-4"></div>
+        <p class="text-gray-500 font-medium">Loading ResQ Paws...</p>
+    </div>
+
+   
+    <div id="domain-helper" class="fixed top-0 left-0 w-full bg-yellow-100 border-b border-yellow-300 px-4 py-2 text-center text-xs text-yellow-900 z-[999999] flex justify-between items-center hidden">
+        <span>Auth Domain: <code id="current-domain-text" class="font-mono font-bold">...</code></span>
+        <button onclick="this.parentElement.remove()" class="text-yellow-600 font-bold ml-2">X</button>
+    </div>
+
+
+    <div id="shutter-flash"></div>
+
+    
+    <div id="three-bg-canvas"></div>
+    <div id="floatingDogs" class="floating-dogs bg-hidden"></div>
+    
+
+    <canvas id="photo-canvas" class="hidden"></canvas>
+
+    
+    <header id="app-header" class="sticky top-0 z-50 w-full bg-transparent transition-shadow">
+        <div class="container mx-auto max-w-3xl px-4 py-4">
+            <div class="flex justify-between items-center">
+                <button id="logo-button" class="flex items-center space-x-2">
+                    <span class="text-2xl">🐕</span>
+                    <span class="font-bold text-gray-800 tracking-tight text-xl">ResQ<br><span class="text-indigo-900">PAWS</span></span>
+                </button>
+                <div class="flex items-center space-x-3">
+                    <button id="about-button" class="text-xs font-bold text-gray-600 hover:text-red-500 transition tracking-wide uppercase">Stories</button>
+                    <button id="home-button" class="text-xs font-bold text-gray-600 hover:text-red-500 transition tracking-wide uppercase">Home</button>
+                    <button id="sign-in-button" class="px-4 py-1.5 text-xs font-bold text-white rounded-full shadow-md hover:shadow-lg transition flex items-center gap-1"
+                        style="background: linear-gradient(90deg, #ef4444, #f97316);">
+                        SIGN IN
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+
+    <main id="app-main" class="flex-grow w-full max-w-3xl mx-auto p-4 relative z-10 min-h-[80vh] flex flex-col">
+        <!-- Content injected here -->
+    </main>
+
+   
+    <footer class="w-full max-w-3xl mx-auto p-6 text-center z-10 text-gray-400 text-xs">
+        &copy; 2025 ResQ Paws. Mobility for every dog.
+    </footer>
+
+  
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+
+        (function() {
+            try {
+                let domain = window.location.hostname;
+                if (!domain && window.location.href) {
+                     try { const url = new URL(window.location.href); domain = url.hostname; } catch(e) {}
+                }
+                const el = document.getElementById('current-domain-text');
+                if(el && domain) {
+                    el.innerText = domain;
+                    document.getElementById('domain-helper').classList.remove('hidden');
+                }
+            } catch(e) {}
+        })();
+
+        let app, auth, db, cameraClickSound;
+        let cameraStream, capturedImageURL = null;
+        let threeScene, threeCamera, threeRenderer, threeGroup;
+        let mouseX = 0, mouseY = 0;
+        let currentRating = 0;
+        let currentFacingMode = 'environment'; 
+        let testimonialData = {}; // Store testimonial data
+
+        const appMain = document.getElementById('app-main');
+        const loader = document.getElementById('app-loader');
+
+        
+        window.addEventListener('load', async () => {
+            try { initThreeJS(); } catch(e) { console.error("3D Error", e); }
+            initFloatingDogs();
+            renderPage('landing');
+
+            try {
+                const config = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+                const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                if (config.apiKey) {
+                    app = initializeApp(config);
+                    auth = getAuth(app);
+                    db = getFirestore(app);
+                    if (token) await signInWithCustomToken(auth, token);
+                    else await signInAnonymously(auth);
+                }
+            } catch (err) { console.error("Firebase Error:", err); }
+
+            try { cameraClickSound = new Tone.MembraneSynth().toDestination(); } catch(e) {}
+
+            setTimeout(() => {
+                loader.style.opacity = '0';
+                setTimeout(() => loader.remove(), 500);
+            }, 500);
+        });
+
+       
+        function renderPage(pageName, data = null) {
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(t => t.stop());
+                cameraStream = null;
+            }
+
+            appMain.classList.add('page-fade-out');
+
+            const threeCanvas = document.getElementById('three-bg-canvas');
+            const floatingDogs = document.getElementById('floatingDogs');
+
+            setTimeout(() => {
+                // Background Logic
+                if (pageName === 'landing' || pageName === 'success') {
+                    if(threeCanvas) threeCanvas.classList.remove('bg-hidden');
+                    if(floatingDogs) floatingDogs.classList.add('bg-hidden');
+                } else {
+                    if(threeCanvas) threeCanvas.classList.add('bg-hidden');
+                    if(floatingDogs) floatingDogs.classList.remove('bg-hidden');
+                }
+
+
+                if (pageName === 'landing') {
+                    appMain.innerHTML = getLandingContent();
+                    setupLandingEvents();
+                } else if (pageName === 'home') {
+                    appMain.innerHTML = getHomeContent();
+                    setupHomeEvents();
+                    startCamera();
+                } else if (pageName === 'signin') {
+                    appMain.innerHTML = getSignInContent();
+                    setupSignInEvents();
+                } else if (pageName === 'review') {
+                    appMain.innerHTML = getReviewContent();
+                    setupReviewEvents();
+                } else if (pageName === 'testimonial') {
+                    appMain.innerHTML = getTestimonialContent();
+                    setupTestimonialEvents();
+                } else if (pageName === 'success') {
+                    appMain.innerHTML = getSuccessPageContent(data);
+                    setupSuccessEvents();
+                } else if (pageName === 'product') { // NEW PAGE
+                    appMain.innerHTML = getProductPageContent();
+                    setupProductEvents();
+                }
+                
+                appMain.classList.remove('page-fade-out');
+            }, 300);
+        }
+
+        
+        function getProductPageContent() {
+            return `
+                <div class="w-full max-w-3xl mx-auto pt-6 pb-12 animate-fade-in-up">
+                    
+                    
+                    <div class="text-center mb-12">
+                        <div class="inline-block p-3 bg-blue-50 rounded-full mb-4">
+                            <span class="text-4xl">🦽</span>
+                        </div>
+                        <h1 class="text-4xl font-extrabold text-gray-900 mb-4 leading-tight">Engineering Hope,<br>Restoring Freedom.</h1>
+                        <p class="text-lg text-gray-600 max-w-xl mx-auto">We build custom, lightweight mobility solutions for paralyzed pets using advanced materials and AI-driven fitting technology.</p>
+                    </div>
+
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-16 px-2">
+                        <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center hover:shadow-md transition">
+                            <div class="text-4xl mb-4 bg-gray-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto">🪶</div>
+                            <h3 class="font-bold text-gray-800 mb-2">Aerospace Alloy</h3>
+                            <p class="text-sm text-gray-500 leading-relaxed">Ultra-lightweight aluminum frames tailored to your dog's weight so they can run without fatigue.</p>
+                        </div>
+                        <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center hover:shadow-md transition">
+                            <div class="text-4xl mb-4 bg-gray-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto">📐</div>
+                            <h3 class="font-bold text-gray-800 mb-2">Precision Fit</h3>
+                            <p class="text-sm text-gray-500 leading-relaxed">Our app analyzes your photos to create a 3D model of your pet, ensuring a comfortable, chafe-free harness.</p>
+                        </div>
+                        <div class="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 text-center hover:shadow-md transition">
+                            <div class="text-4xl mb-4 bg-gray-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto">🚜</div>
+                            <h3 class="font-bold text-gray-800 mb-2">All-Terrain</h3>
+                            <p class="text-sm text-gray-500 leading-relaxed">Rugged, air-filled tires designed for grass, sand, hiking trails, and city sidewalks.</p>
+                        </div>
+                    </div>
+
+                    
+                    <div class="bg-white rounded-3xl shadow-lg border border-gray-100 p-8 mb-12">
+                        <h2 class="text-2xl font-bold text-gray-900 mb-8 text-center">Community Stories</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            
+                            
+                            <div class="flex flex-col items-center text-center p-4 bg-gray-50 rounded-xl">
+                                <img src="https://placehold.co/100x100/fb923c/ffffff?text=Max" class="w-20 h-20 rounded-full mb-4 border-4 border-white shadow-sm">
+                                <p class="text-gray-600 italic mb-4 text-sm">"Max was depressed after his surgery. The moment we strapped him into his ResQ wheels, he took off running! It gave us our dog back."</p>
+                                <span class="font-bold text-gray-800 text-sm">- Sarah & Max 🐕</span>
+                            </div>
+
+                            
+                            <div class="flex flex-col items-center text-center p-4 bg-gray-50 rounded-xl">
+                                <img src="https://placehold.co/100x100/3b82f6/ffffff?text=Bella" class="w-20 h-20 rounded-full mb-4 border-4 border-white shadow-sm">
+                                <p class="text-gray-600 italic mb-4 text-sm">"The fitting process was so easy. I just took a picture with the app, and the wheels arrived perfectly adjusted. Incredible service."</p>
+                                <span class="font-bold text-gray-800 text-sm">- James & Bella 🐩</span>
+                            </div>
+
+                            
+                            <div class="flex flex-col items-center text-center p-4 bg-gray-50 rounded-xl">
+                                <img src="https://placehold.co/100x100/22c55e/ffffff?text=Rocky" class="w-20 h-20 rounded-full mb-4 border-4 border-white shadow-sm">
+                                <p class="text-gray-600 italic mb-4 text-sm">"We thought our hiking days were over. Thanks to ResQ Paws, Rocky is back on the trails with us. Sturdy and reliable gear."</p>
+                                <span class="font-bold text-gray-800 text-sm">- Elena & Rocky 🐕‍🦺</span>
+                            </div>
+
+                            
+                            <div class="flex flex-col items-center text-center p-4 bg-gray-50 rounded-xl">
+                                <img src="https://placehold.co/100x100/ec4899/ffffff?text=Coco" class="w-20 h-20 rounded-full mb-4 border-4 border-white shadow-sm">
+                                <p class="text-gray-600 italic mb-4 text-sm">"It's not just a wheelchair; it's freedom. Coco's tail hasn't stopped wagging since the unboxing."</p>
+                                <span class="font-bold text-gray-800 text-sm">- The Miller Family 🐾</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    
+                    <div class="text-center">
+                        <h3 class="text-xl font-bold text-gray-800 mb-4">Ready to change a life?</h3>
+                        <button id="btn-product-cta" class="px-8 py-4 bg-gray-900 text-white font-bold rounded-full shadow-xl hover:bg-gray-800 transition transform hover:scale-105 flex items-center justify-center mx-auto gap-2">
+                            Start Your Journey <span class="text-xl">🚀</span>
+                        </button>
+                    </div>
+
+                </div>
+            `;
+        }
+
+        function getLandingContent() {
+            const title = "ResQ Paws";
+            const animatedTitle = title.split('').map((char, i) => 
+                `<span class="title-char" style="animation-delay: ${i*50}ms">${char}</span>`
+            ).join('');
+
+            return `
+                <div class="flex flex-col items-center justify-center pt-10 text-center relative z-10">
+                    <div class="bg-white/60 backdrop-blur-xl p-8 rounded-3xl border border-white/50 shadow-xl w-full max-w-md transform transition hover:scale-[1.02]">
+                        <div class="text-6xl mb-4">🐕</div>
+                        <h1 class="text-5xl font-extrabold text-gray-900 tracking-tight mb-2">${animatedTitle}</h1>
+                        <p class="text-lg text-gray-700 font-medium">Mobility for every paw. Custom wheels for paralyzed dogs.</p>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4 w-full max-w-md mt-8">
+                        <div class="feature-tile p-5 rounded-2xl flex flex-col items-center">
+                            <span class="text-3xl mb-1">📏</span>
+                            <span class="font-bold text-gray-800">Fitting</span>
+                            <p class="text-xs text-gray-600 mt-1">Precise Size</p>
+                        </div>
+                        <div class="feature-tile p-5 rounded-2xl flex flex-col items-center">
+                            <span class="text-3xl mb-1">⚙️</span>
+                            <span class="font-bold text-gray-800">Build</span>
+                            <p class="text-xs text-gray-600 mt-1">Custom Gear</p>
+                        </div>
+                        <div class="feature-tile p-5 rounded-2xl flex flex-col items-center">
+                            <span class="text-3xl mb-1">💨</span>
+                            <span class="font-bold text-gray-800">Freedom</span>
+                            <p class="text-xs text-gray-600 mt-1">Run Again</p>
+                        </div>
+                        <div class="feature-tile p-5 rounded-2xl flex flex-col items-center">
+                            <span class="text-3xl mb-1">❤️</span>
+                            <span class="font-bold text-gray-800">Community</span>
+                            <p class="text-xs text-gray-600 mt-1">Support</p>
+                        </div>
+                    </div>
+
+                    <button id="btn-get-started" class="mt-12 group relative inline-flex items-center justify-center px-8 py-4 font-bold text-white transition-all duration-200 bg-gray-900 font-pj rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-900 hover:scale-105 shadow-2xl">
+                        Get Rolling
+                        <svg class="w-5 h-5 ml-2 transition-transform group-hover:translate-x-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                        </svg>
+                    </button>
+                </div>
+            `;
+        }
+
+        
+        function getHomeContent() {
+            return `
+                <div class="flex flex-col items-center w-full max-w-md mx-auto pt-4">
+                    <h2 class="text-3xl font-black text-gray-300 text-stroke-white mb-6 text-center tracking-widest uppercase drop-shadow-sm" style="-webkit-text-stroke: 1px #fff; text-shadow: 2px 2px 4px rgba(0,0,0,0.1);">
+                        JUST<br>CAPTURE IT...
+                    </h2>
+                    
+                    <div class="camera-box w-full aspect-[4/5] bg-[#8b8080] rounded-[40px] overflow-hidden relative shadow-inner">
+                        <div id="camera-view" class="w-full h-full flex items-center justify-center">
+                            <div class="loader"></div>
+                        </div>
+                    </div>
+
+                    <div class="w-full mt-12 flex flex-col items-center min-h-[80px] px-2">
+                        <div id="state-capture" class="flex items-center justify-center w-full relative">
+                            <button id="btn-switch-camera" class="absolute left-8 p-3 rounded-full bg-white border border-gray-200 text-gray-600 shadow-md hover:bg-gray-50 transition" title="Switch Camera">
+                                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                            </button>
+                            <button id="btn-capture" class="w-20 h-20 rounded-full bg-white border-4 border-gray-200 shadow-xl active:scale-95 transition"></button>
+                        </div>
+                        <div id="state-review" class="hidden flex w-full justify-between items-center gap-4">
+                            <button id="btn-retake" class="flex-1 py-3 px-4 bg-[#1a1b3a] text-white rounded-full font-bold text-sm shadow-lg hover:opacity-90 transition flex items-center justify-center gap-2">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                                RETAKE PHOTO
+                            </button>
+                            <button id="btn-perfect" class="flex-1 py-3 px-4 bg-[#c86b6b] text-white rounded-full font-bold text-sm shadow-lg hover:opacity-90 transition">
+                                PICTURE PERFECT?
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function getSignInContent() {
+            return `
+                <div class="w-full max-w-sm mx-auto bg-white p-8 rounded-3xl shadow-xl border-t-4 border-red-500 mt-10 transform -rotate-2 hover:rotate-0 transition duration-300">
+                    <h2 class="text-3xl font-extrabold text-gray-900 mb-6 text-center">Rescuer Login</h2>
+                    <form id="form-signin" class="space-y-5">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                            <input type="email" class="app-input" placeholder="rescuer@example.com">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                            <div class="password-container">
+                                <input type="password" id="password" class="app-input" placeholder="••••••••">
+                                <span id="password-toggle" class="password-toggle">
+                                    <svg id="eye-open" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                    <svg id="eye-closed" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7 1.274-4.057 5.064-7 9.542-7 1.35 0 2.64.256 3.832.734m2.066 1.066A10.007 10.007 0 0112 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7a10.048 10.048 0 01-3.41-0.69M9 12a3 3 0 116 0 3 3 0 01-6 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M1 1l22 22"></path></svg>
+                                </span>
+                            </div>
+                        </div>
+                        <button class="w-full py-3 bg-gradient-to-r from-red-500 to-orange-500 text-white font-bold rounded-xl shadow-lg hover:shadow-xl transition transform hover:scale-[1.02]">
+                            Log In
+                        </button>
+                    </form>
+                    <div class="flex items-center justify-center my-6 opacity-80">
+                        <svg width="100%" height="20" viewBox="0 0 300 20" fill="none"><path d="M0 10 Q 75 -10, 150 10 T 300 10" stroke="#d06060" stroke-width="2.5" stroke-linecap="round"/></svg>
+                        <span class="px-4 text-sm font-semibold text-gray-500 bg-white -ml-2 -mr-2 absolute">OR</span>
+                    </div>
+                    <button id="btn-google" class="w-full py-3 bg-white border border-gray-300 text-gray-700 font-bold rounded-xl shadow-sm hover:bg-gray-50 transition flex items-center justify-center">
+                        <span class="mr-2 text-xl">G</span> Google
+                    </button>
+                </div>
+            `;
+        }
+
+        function getReviewContent() {
+            const img = capturedImageURL || 'https://placehold.co/400x300/e2e8f0/94a3b8?text=No+Image';
+            return `
+                <div class="w-full max-w-sm mx-auto bg-white p-6 rounded-3xl shadow-xl mt-6 transform rotate-1 hover:rotate-0 transition duration-300">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-4 text-center">Great Angle! 📸</h2>
+                    <div id="review-container" class="w-full h-64 bg-gray-100 rounded-2xl overflow-hidden shadow-inner mb-4 border-2 border-dashed border-gray-300 relative">
+                        <img src="${img}" class="w-full h-full object-cover">
+                    </div>
+                    <div class="mb-4">
+                        <p class="text-xs text-center text-gray-500 mb-2">Tap to Decorate</p>
+                        <div class="flex justify-center space-x-4">
+                            <button class="sticker-btn text-2xl hover:scale-125 transition transform active:scale-95">🐾</button>
+                            <button class="sticker-btn text-2xl hover:scale-125 transition transform active:scale-95">❤️</button>
+                            <button class="sticker-btn text-2xl hover:scale-125 transition transform active:scale-95">🐕</button>
+                            <button class="sticker-btn text-2xl hover:scale-125 transition transform active:scale-95">🦴</button>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <button id="btn-edit" class="py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition">Retake</button>
+                        <button id="btn-confirm" class="py-3 bg-green-500 text-white font-bold rounded-xl shadow-lg hover:bg-green-600 transition">Next</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function getTestimonialContent() {
+            const img = capturedImageURL || 'https://placehold.co/150x150/e2e8f0/94a3b8?text=Img';
+            return `
+                <div class="w-full max-w-sm mx-auto bg-white p-8 rounded-3xl shadow-xl mt-16 relative border border-blue-100 transform -rotate-1 hover:rotate-0 transition pb-24">
+                    <div class="absolute -top-16 left-1/2 transform -translate-x-1/2">
+                        <img src="${img}" class="w-32 h-32 object-cover rounded-full border-4 border-white shadow-lg bg-gray-200">
+                    </div>
+                    <h2 class="text-2xl font-bold text-gray-800 mt-12 mb-2 text-center">Share Your Story</h2>
+                    <p class="text-gray-500 text-center text-sm mb-6">Help us help more dogs!</p>
+                    
+                    <form id="testimonial-form" class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Dog's Name</label>
+                            <input type="text" id="dogName" placeholder="e.g. Buster" class="app-input" required>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Experience with Wheels</label>
+                            <textarea id="experience" rows="2" placeholder="How did the fitting go?" class="app-input" required></textarea>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-bold text-gray-500 uppercase mb-1">Feeling about Organization</label>
+                            <textarea id="feeling" rows="2" placeholder="What do you think of ResQ Paws?" class="app-input" required></textarea>
+                        </div>
+
+                        <div class="flex items-start gap-3 p-3 bg-blue-50 rounded-xl border border-blue-100 mt-2">
+                            <input type="checkbox" id="consent" class="mt-1 w-5 h-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500">
+                            <label for="consent" class="text-xs text-gray-600 leading-tight">
+                                I agree to allow ResQ Paws to publish my testimonial and photo on their website to inspire others.
+                            </label>
+                        </div>
+
+                        <button id="btn-submit-story" class="w-full py-3 bg-blue-500 text-white font-bold rounded-xl shadow-lg hover:bg-blue-600 transition mt-4">
+                            Submit Story
+                        </button>
+                    </form>
+                </div>
+            `;
+        }
+
+        
+        function getSuccessPageContent(data) {
+            const hasConsent = data && data.consent;
+            const img = capturedImageURL || 'https://placehold.co/400x300/e2e8f0/94a3b8?text=Happy+Dog';
+            const name = data ? data.name : "Your Dog";
+            const story = data ? data.experience : "Running free!";
+
+            let contentHtml = '';
+
+            if (hasConsent) {
+                
+                contentHtml = `
+                    <div class="pop-card bg-white p-6 rounded-[40px] shadow-2xl border-4 border-yellow-300 transform rotate-1 max-w-sm w-full relative overflow-hidden">
+                        <div class="absolute top-0 left-0 w-full h-32 bg-yellow-200 z-0"></div>
+                        <div class="relative z-10 flex flex-col items-center">
+                            <h1 class="text-4xl font-black text-yellow-500 mb-4 drop-shadow-sm bg-white px-4 py-1 rounded-full transform -rotate-2">COMMUNITY SPOTLIGHT!</h1>
+                            <div class="w-48 h-48 rounded-full border-8 border-white shadow-lg overflow-hidden mb-4 bg-gray-200">
+                                <img src="${img}" class="w-full h-full object-cover">
+                            </div>
+                            <h2 class="text-3xl font-bold text-gray-800 mb-2">${name}</h2>
+                            <p class="text-center text-gray-600 italic mb-6">"${story}"</p>
+                            <div class="flex gap-2">
+                                <span class="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold">#ResQHero</span>
+                                <span class="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">#RollingFree</span>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="text-gray-600 mt-8 font-bold bg-white/80 px-4 py-2 rounded-lg">Thanks for sharing your journey! 🐾</p>
+                `;
+            } else {
+                
+                contentHtml = `
+                    <div class="pop-card bg-white p-8 rounded-[40px] shadow-2xl border-4 border-purple-300 max-w-sm w-full text-center relative overflow-hidden">
+                        <div class="absolute -top-10 -right-10 w-40 h-40 bg-purple-100 rounded-full z-0"></div>
+                        <div class="relative z-10">
+                            <h1 class="text-4xl font-black text-purple-500 mb-6">YOU ROCK! 🤘</h1>
+                            <div class="text-6xl mb-6">🤫</div>
+                            <h2 class="text-xl font-bold text-gray-800 mb-2">Secret Feedback Received</h2>
+                            <p class="text-gray-600 mb-6">We've locked your story in our vault. Your privacy is safe with us!</p>
+                            <div class="p-4 bg-purple-50 rounded-2xl border border-purple-100">
+                                <p class="text-sm text-purple-800 font-medium">"Thanks for helping us improve ResQ Paws for everyone."</p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="flex flex-col items-center justify-center min-h-[70vh] w-full pt-10">
+                    ${contentHtml}
+                    <!-- NEW BUTTON to Product Page -->
+                    <button id="btn-go-to-product" class="mt-8 px-8 py-3 bg-gray-900 text-white font-bold rounded-full shadow-lg hover:scale-105 transition">
+                        Meet the Community
+                    </button>
+                </div>
+            `;
+        }
+
+        
+        function setupLandingEvents() {
+            document.getElementById('btn-get-started').onclick = () => renderPage('home');
+        }
+
+        function setupProductEvents() {
+            document.getElementById('btn-product-cta').onclick = () => renderPage('landing');
+        }
+
+        function setupHomeEvents() {
+            document.getElementById('btn-switch-camera').onclick = () => {
+                currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+                startCamera();
+            };
+            document.getElementById('btn-capture').onclick = () => {
+                const video = document.querySelector('video');
+                if (!video) return;
+                
+                if (Tone.context.state !== 'running') {
+                    Tone.start().then(() => { if(cameraClickSound) cameraClickSound.triggerAttackRelease("C2", "8n"); });
+                } else if(cameraClickSound) { cameraClickSound.triggerAttackRelease("C2", "8n"); }
+
+                const flash = document.getElementById('shutter-flash');
+                flash.classList.add('flash');
+                setTimeout(() => flash.classList.remove('flash'), 100);
+
+                const canvas = document.getElementById('photo-canvas');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                canvas.getContext('2d').drawImage(video, 0, 0);
+                capturedImageURL = canvas.toDataURL('image/jpeg');
+
+                stopCameraStream();
+                document.getElementById('camera-view').innerHTML = `<img src="${capturedImageURL}" class="w-full h-full object-cover">`;
+                document.getElementById('state-capture').classList.add('hidden');
+                document.getElementById('state-review').classList.remove('hidden');
+            };
+            document.getElementById('btn-retake').onclick = () => {
+                document.getElementById('state-review').classList.add('hidden');
+                document.getElementById('state-capture').classList.remove('hidden');
+                startCamera();
+            };
+            document.getElementById('btn-perfect').onclick = () => renderPage('review');
+        }
+
+        function setupSignInEvents() {
+            document.getElementById('form-signin').onsubmit = (e) => { e.preventDefault(); renderPage('home'); };
+            document.getElementById('btn-google').onclick = async (e) => {
+                e.preventDefault();
+                try {
+                    const provider = new GoogleAuthProvider();
+                    await signInWithPopup(auth, provider);
+                    renderPage('home');
+                } catch (err) { alert("Enable Google Auth in Firebase Console."); }
+            };
+            const toggle = document.getElementById('password-toggle');
+            if(toggle) toggle.onclick = () => {
+                const i = document.getElementById('password');
+                const show = i.type === 'password';
+                i.type = show ? 'text' : 'password';
+                document.getElementById('eye-open').classList.toggle('hidden', show);
+                document.getElementById('eye-closed').classList.toggle('hidden', !show);
+            };
+        }
+
+        function setupReviewEvents() {
+            document.getElementById('btn-edit').onclick = () => renderPage('home');
+            document.getElementById('btn-confirm').onclick = () => renderPage('testimonial');
+            const container = document.getElementById('review-container');
+            document.querySelectorAll('.sticker-btn').forEach(btn => {
+                btn.onclick = () => {
+                    const sticker = document.createElement('div');
+                    sticker.innerText = btn.innerText;
+                    sticker.style.position = 'absolute';
+                    sticker.style.left = Math.random() * 80 + 10 + '%'; 
+                    sticker.style.top = Math.random() * 80 + 10 + '%';
+                    sticker.style.fontSize = '2rem';
+                    sticker.style.transform = `rotate(${Math.random() * 40 - 20}deg) scale(0)`;
+                    sticker.style.transition = 'transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
+                    container.appendChild(sticker);
+                    requestAnimationFrame(() => { sticker.style.transform = `rotate(${Math.random() * 40 - 20}deg) scale(1)`; });
+                };
+            });
+        }
+
+        function setupTestimonialEvents() {
+            document.getElementById('testimonial-form').onsubmit = (e) => {
+                e.preventDefault();
+                const data = {
+                    name: document.getElementById('dogName').value,
+                    experience: document.getElementById('experience').value,
+                    feeling: document.getElementById('feeling').value,
+                    consent: document.getElementById('consent').checked
+                };
+                renderPage('success', data);
+            };
+        }
+
+        function setupSuccessEvents() {
+            document.getElementById('btn-go-to-product').onclick = () => {
+                capturedImageURL = null;
+                renderPage('product');
+            }
+        }
+
+        
+        document.getElementById('logo-button').onclick = () => renderPage('landing');
+        document.getElementById('home-button').onclick = () => renderPage('landing');
+        document.getElementById('about-button').onclick = () => renderPage('product'); // Link "Stories" to Product page
+        document.getElementById('sign-in-button').onclick = () => renderPage('signin');
+
+        
+        function startCamera() {
+            const view = document.getElementById('camera-view');
+            if(!view) return;
+            view.innerHTML = `<div class="loader"></div>`;
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                navigator.mediaDevices.getUserMedia({ video: { facingMode: currentFacingMode } })
+                .then(stream => {
+                    cameraStream = stream;
+                    const vid = document.createElement('video');
+                    vid.srcObject = stream;
+                    vid.autoplay = true;
+                    vid.playsInline = true;
+                    if (currentFacingMode === 'user') vid.style.transform = 'scaleX(-1)';
+                    vid.onloadedmetadata = () => { view.innerHTML = ''; view.appendChild(vid); };
+                }).catch(() => view.innerHTML = '<p class="text-white text-center p-4">Camera unavailable.</p>');
+            } else { view.innerHTML = '<p class="text-white">Not supported.</p>'; }
+        }
+
+        function stopCameraStream() { if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; } }
+
+        function initFloatingDogs() {
+            const container = document.getElementById('floatingDogs');
+            const emojis = ["🐶", "🐕", "🐩", "🦴", "🐾"];
+            setInterval(() => {
+                if (!document.getElementById('three-bg-canvas').classList.contains('bg-hidden')) return;
+                const el = document.createElement('div');
+                el.classList.add('dog-emoji');
+                el.innerText = emojis[Math.floor(Math.random() * emojis.length)];
+                el.style.left = Math.random() * 95 + 'vw';
+                el.style.animationDuration = (10 + Math.random() * 10) + 's';
+                container.appendChild(el);
+                setTimeout(() => el.remove(), 20000);
+            }, 1000);
+        }
+
+        function createEmojiTexture(emoji) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128; canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            ctx.font = '100px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(emoji, 64, 64);
+            const tex = new THREE.CanvasTexture(canvas); tex.needsUpdate = true;
+            return tex;
+        }
+
+        function initThreeJS() {
+            const container = document.getElementById('three-bg-canvas');
+            if (!container) return;
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 30;
+            const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            container.appendChild(renderer.domElement);
+            const group = new THREE.Group(); scene.add(group);
+            const emojis = ['🦴', '❤️', '🎾', '🐾'];
+            const materials = emojis.map(e => new THREE.SpriteMaterial({ map: createEmojiTexture(e) }));
+            for (let i = 0; i < 40; i++) {
+                const mat = materials[Math.floor(Math.random() * materials.length)];
+                const sprite = new THREE.Sprite(mat);
+                sprite.position.set((Math.random() - 0.5) * 80, (Math.random() - 0.5) * 80, (Math.random() - 0.5) * 50);
+                const scale = Math.random() * 3 + 2; 
+                sprite.scale.set(scale, scale, 1);
+                group.add(sprite);
+            }
+            function animate() {
+                requestAnimationFrame(animate);
+                group.rotation.y += 0.002; group.rotation.x += 0.001;
+                camera.position.x += (mouseX * 5 - camera.position.x) * 0.05;
+                camera.position.y += (-mouseY * 5 - camera.position.y) * 0.05;
+                camera.lookAt(scene.position);
+                renderer.render(scene, camera);
+            }
+            animate();
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+            document.addEventListener('mousemove', (e) => {
+                mouseX = (e.clientX / window.innerWidth) * 2 - 1;
+                mouseY = (e.clientY / window.innerHeight) * 2 - 1;
+            });
+        }
+    </script>
+</body>
+</html>

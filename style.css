@@ -1,0 +1,144 @@
+        body {
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            overflow-x: hidden;
+            background: linear-gradient(180deg, #f0f9ff 0%, #e0f2fe 50%, #dbeafe 100%);
+        }
+
+       
+        .page {
+            opacity: 1;
+            transition: opacity 0.3s ease-in-out;
+        }
+        .page-fade-out {
+            opacity: 0;
+        }
+
+                .floating-dogs {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            overflow: hidden;
+            pointer-events: none;
+            z-index: 0;
+            transition: opacity 0.5s;
+        }
+        #three-bg-canvas {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            overflow: hidden;
+            pointer-events: none;
+            z-index: 0;
+            transition: opacity 0.5s;
+        }
+        .bg-hidden { opacity: 0; pointer-events: none; }
+
+      
+        #app-loader {
+            position: fixed; inset: 0; background: white; z-index: 10000;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            transition: opacity 0.5s ease-out;
+        }
+        .loader-spinner {
+            width: 50px; height: 50px; border: 5px solid #e2e8f0;
+            border-top-color: #ef4444; border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+        
+        .camera-box {
+            width: 100%; 
+            height: 380px; 
+            background: #8b8080; 
+            border-radius: 40px; 
+            overflow: hidden; 
+            position: relative;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.1);
+            transition: transform 0.3s;
+        }
+        .camera-box video, .camera-box img { width: 100%; height: 100%; object-fit: cover; }
+
+        #shutter-flash {
+            position: fixed; inset: 0; background: white;
+            z-index: 9999; opacity: 0; pointer-events: none;
+            transition: opacity 0.1s;
+        }
+        #shutter-flash.flash { opacity: 1; }
+
+
+        .feature-tile {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            transition: transform 0.3s, box-shadow 0.3s;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        .feature-tile:hover {
+            transform: translateY(-5px);
+            background: rgba(255, 255, 255, 0.9);
+        }
+
+       
+        .app-input {
+            width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 12px;
+            transition: border-color 0.2s, transform 0.2s;
+        }
+        .app-input:focus {
+            outline: none; border-color: #ef4444;
+            box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+            animation: jiggle-once 0.3s ease-in-out;
+        }
+        @keyframes jiggle-once {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-3px) rotate(-1deg); }
+            75% { transform: translateX(3px) rotate(1deg); }
+        }
+        
+        .password-container { position: relative; }
+        .password-toggle {
+            position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+            cursor: pointer; color: #9CA3AF;
+        }
+        .password-toggle:hover { color: #ef4444; }
+
+     
+        .title-char {
+            display: inline-block; opacity: 0; transform: translateY(20px);
+            animation: slideUpFade 0.5s forwards;
+        }
+        @keyframes slideUpFade { to { opacity: 1; transform: translateY(0); } }
+
+        @keyframes floatUp {
+            0% { transform: translateY(110vh) rotate(0deg); opacity: 0; }
+            10% { opacity: 1; }
+            100% { transform: translateY(-10vh) rotate(360deg); opacity: 0; }
+        }
+        .dog-emoji {
+            position: absolute; font-size: 2rem; animation: floatUp 15s linear infinite;
+        }
+        
+      
+        .paw-rating { display: flex; justify-content: center; gap: 8px; }
+        .paw-rating span {
+            font-size: 2.5rem; color: #CBD5E1; cursor: pointer;
+            transition: transform 0.1s, color 0.2s;
+        }
+        .paw-rating span:hover { transform: scale(1.2); }
+        .paw-rating span.selected, .paw-rating:hover span:hover { color: #FBBF24; }
+        .paw-rating:hover span { color: #CBD5E1; }
+
+
+   .text-stroke-white {
+            -webkit-text-stroke: 1px white;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+        }
+
+      
+        @keyframes popIn {
+            0% { transform: scale(0); opacity: 0; }
+            80% { transform: scale(1.1); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .pop-card {
+            animation: popIn 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
